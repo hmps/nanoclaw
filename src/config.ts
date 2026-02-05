@@ -41,6 +41,12 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+// Email channel
+export const EMAIL_POLL_INTERVAL = 60000;
+export const EMAIL_LABEL = 'Pi';
+export const EMAIL_CONTEXT_MODE: 'sender' = 'sender';
+export const GMAIL_MCP_DIR = path.join(HOME_DIR, '.gmail-mcp');
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

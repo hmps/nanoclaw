@@ -149,6 +149,16 @@ function buildVolumeMounts(
     }
   }
 
+  // Gmail MCP credentials (rw for token refresh)
+  const gmailMcpDir = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(gmailMcpDir)) {
+    mounts.push({
+      hostPath: gmailMcpDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(

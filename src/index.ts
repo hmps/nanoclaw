@@ -38,6 +38,7 @@ import {
   storeMessage,
   updateChatName,
 } from './db.js';
+import { startEmailLoop } from './email-channel.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { NewMessage, RegisteredGroup, Session } from './types.js';
 import { loadJson, saveJson } from './utils.js';
@@ -723,6 +724,13 @@ async function connectWhatsApp(): Promise<void> {
       });
       startIpcWatcher();
       startMessageLoop();
+      startEmailLoop({
+        getSessions: () => sessions,
+        saveSessions: (s) => {
+          sessions = s;
+          saveState();
+        },
+      });
     }
   });
 
