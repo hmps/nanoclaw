@@ -9,6 +9,11 @@ store/
 data/
 logs/
 
+# Runtime group artifacts
+groups/*/images/
+groups/*/logs/
+groups/*/conversations/
+
 # Secrets
 *.keys.json
 .env

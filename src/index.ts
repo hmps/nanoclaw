@@ -692,6 +692,29 @@ async function connectTelegram(): Promise<void> {
         }
       }
 
+      if (msg.photo) {
+        try {
+          const photo = msg.photo[msg.photo.length - 1];
+          const file = await bot.api.getFile(photo.file_id);
+          const url = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+          const resp = await fetch(url);
+          const buffer = Buffer.from(await resp.arrayBuffer());
+
+          const group = registeredGroups[chatId];
+          const imagesDir = path.join(DATA_DIR, '..', 'groups', group.folder, 'images');
+          fs.mkdirSync(imagesDir, { recursive: true });
+          const ext = path.extname(file.file_path || '') || '.jpg';
+          const filename = `${messageId}${ext}`;
+          fs.writeFileSync(path.join(imagesDir, filename), buffer);
+
+          const caption = msg.caption || '';
+          text = `[Image: /workspace/group/images/${filename}]${caption ? ' ' + caption : ''}`;
+        } catch (err) {
+          logger.error({ err, messageId }, 'Photo download failed');
+          text = msg.caption || '[Photo]';
+        }
+      }
+
       storeMessage(chatId, messageId, text, sender, senderName, timestamp, isFromMe);
     }
   });

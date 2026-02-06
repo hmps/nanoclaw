@@ -199,7 +199,45 @@ async function connectTelegram(): Promise<void> {
     storeChatMetadata(chatId, timestamp, chatName);
 
     if (registeredGroups[chatId]) {
-      const text = msg.text || msg.caption || '';
+      let text = msg.text || msg.caption || '';
+
+      if (msg.voice) {
+        try {
+          const file = await bot.api.getFile(msg.voice.file_id);
+          const url = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+          const resp = await fetch(url);
+          const buffer = Buffer.from(await resp.arrayBuffer());
+          const transcript = await transcribeVoiceMessage(buffer, messageId);
+          text = `[Voice: ${transcript}]`;
+        } catch (err) {
+          logger.error({ err, messageId }, 'Voice transcription failed');
+          text = '[Voice Message]';
+        }
+      }
+
+      if (msg.photo) {
+        try {
+          const photo = msg.photo[msg.photo.length - 1];
+          const file = await bot.api.getFile(photo.file_id);
+          const url = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+          const resp = await fetch(url);
+          const buffer = Buffer.from(await resp.arrayBuffer());
+
+          const group = registeredGroups[chatId];
+          const imagesDir = path.join(DATA_DIR, '..', 'groups', group.folder, 'images');
+          fs.mkdirSync(imagesDir, { recursive: true });
+          const ext = path.extname(file.file_path || '') || '.jpg';
+          const filename = `${messageId}${ext}`;
+          fs.writeFileSync(path.join(imagesDir, filename), buffer);
+
+          const caption = msg.caption || '';
+          text = `[Image: /workspace/group/images/${filename}]${caption ? ' ' + caption : ''}`;
+        } catch (err) {
+          logger.error({ err, messageId }, 'Photo download failed');
+          text = msg.caption || '[Photo]';
+        }
+      }
+
       storeMessage(chatId, messageId, text, sender, senderName, timestamp, false);
     }
   });
@@ -263,7 +301,23 @@ exec /path/to/node "$(dirname "$0")/../dist/index.js"
 
 Update plist `ProgramArguments` to use `/bin/bash bin/start.sh` instead of invoking node directly. Remove any hardcoded env vars from the plist (like `ASSISTANT_NAME`) — they now come from `.env`.
 
-### A10. Documentation updates
+### A10. Image support & `.gitignore`
+
+Photos are saved to `groups/{folder}/images/` and referenced as `[Image: /workspace/group/images/{id}.jpg]` in messages. The agent uses its `Read` tool (multimodal) to view them. Add to `.gitignore`:
+
+```
+groups/*/images/
+groups/*/logs/
+groups/*/conversations/
+```
+
+Add to `groups/global/CLAUDE.md` and `groups/main/CLAUDE.md` under "What You Can Do":
+
+```
+- View images shared in the chat (use the Read tool on `[Image: /path]` references)
+```
+
+### A11. Documentation updates
 
 | File | Change |
 |------|--------|
@@ -272,7 +326,7 @@ Update plist `ProgramArguments` to use `/bin/bash bin/start.sh` instead of invok
 | `groups/main/CLAUDE.md:111` | Remove `WHERE jid LIKE '%@g.us' AND` — just `WHERE jid != '__group_sync__'` |
 | `groups/main/CLAUDE.md:133` | "WhatsApp JID" → "Telegram chat ID" |
 
-### A11. `.claude/skills/setup/SKILL.md`
+### A12. `.claude/skills/setup/SKILL.md`
 
 **Section 5** — Replace WhatsApp QR auth with Telegram token verification:
 
@@ -459,7 +513,9 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 | `bin/start.sh` | Create (launchd wrapper) | — |
 | `package.json` | Swap deps | Add grammy |
 | `container/agent-runner/src/ipc-mcp.ts` | Channel-agnostic | Same |
-| `groups/main/CLAUDE.md` | Update refs | — |
+| `groups/main/CLAUDE.md` | Update refs + image instruction | Image instruction |
+| `groups/global/CLAUDE.md` | Image instruction | Same |
+| `.gitignore` | Add `groups/*/images/` | Same |
 | `CLAUDE.md` | Update arch line | — |
 | `.claude/skills/setup/SKILL.md` | Update auth + register | — |
 | `data/registered_groups.json` | TG chat IDs | Add with `channel` |
