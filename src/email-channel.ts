@@ -27,6 +27,7 @@ import { RegisteredGroup, Session } from './types.js';
 export interface EmailChannelDependencies {
   getSessions: () => Session;
   saveSessions: (sessions: Session) => void;
+  getMainChatJid: () => string | null;
 }
 
 function loadOAuthClient(): OAuth2Client | null {
@@ -322,11 +323,13 @@ export function startEmailLoop(deps: EmailChannelDependencies): void {
         );
 
         try {
+          // Use main WhatsApp JID if available, otherwise fall back to email pseudo-JID
+          const mainJid = deps.getMainChatJid();
           const output = await runContainerAgent(group, {
             prompt,
             sessionId: sessions[groupFolder],
             groupFolder,
-            chatJid: `email:${email.fromEmail}`,
+            chatJid: mainJid || `email:${email.fromEmail}`,
             isMain: false,
           });
 

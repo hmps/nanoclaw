@@ -338,9 +338,11 @@ function startIpcWatcher(): void {
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
+                const isEmailAgent = sourceGroup.startsWith('email-');
                 if (
                   isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
+                  (targetGroup && targetGroup.folder === sourceGroup) ||
+                  (isEmailAgent && targetGroup && targetGroup.folder === MAIN_GROUP_FOLDER)
                 ) {
                   await sendMessage(
                     data.chatJid,
@@ -729,6 +731,13 @@ async function connectWhatsApp(): Promise<void> {
         saveSessions: (s) => {
           sessions = s;
           saveState();
+        },
+        getMainChatJid: () => {
+          // Find the main group's JID
+          const mainEntry = Object.entries(registeredGroups).find(
+            ([_, group]) => group.folder === MAIN_GROUP_FOLDER
+          );
+          return mainEntry ? mainEntry[0] : null;
         },
       });
     }
