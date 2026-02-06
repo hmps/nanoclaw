@@ -47,6 +47,10 @@ export const EMAIL_LABEL = 'Pi';
 export const EMAIL_CONTEXT_MODE: 'sender' = 'sender';
 export const GMAIL_MCP_DIR = path.join(HOME_DIR, '.gmail-mcp');
 
+// Telegram
+export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME || '';
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =
