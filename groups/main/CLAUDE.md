@@ -40,15 +40,15 @@ You have access to Gmail via MCP tools:
 - `mcp__gmail__draft_email` — create a draft
 - `mcp__gmail__list_labels` — list Gmail labels
 
-## WhatsApp Formatting
+## Telegram Formatting
 
-Do NOT use markdown headings (##) in WhatsApp messages. Only use:
+Telegram supports basic markdown:
 - *Bold* (asterisks)
 - _Italic_ (underscores)
-- • Bullets (bullet points)
+- `Code` (backticks)
 - ```Code blocks``` (triple backticks)
 
-Keep messages clean and readable for WhatsApp.
+Keep messages clean and readable.
 
 ---
 
@@ -82,7 +82,7 @@ Available groups are provided in `/workspace/ipc/available_groups.json`:
 {
   "groups": [
     {
-      "jid": "120363336345536173@g.us",
+      "jid": "-1001234567890",
       "name": "Family Chat",
       "lastActivity": "2026-01-31T12:00:00.000Z",
       "isRegistered": false
@@ -92,7 +92,7 @@ Available groups are provided in `/workspace/ipc/available_groups.json`:
 }
 ```
 
-Groups are ordered by most recent activity. The list is synced from WhatsApp daily.
+Groups are ordered by most recent activity. The list is synced from Telegram daily.
 
 If a group the user mentions isn't in the list, request a fresh sync:
 
@@ -108,7 +108,7 @@ Then wait a moment and re-read `available_groups.json`.
 sqlite3 /workspace/project/store/messages.db "
   SELECT jid, name, last_message_time
   FROM chats
-  WHERE jid LIKE '%@g.us' AND jid != '__group_sync__'
+  WHERE jid != '__group_sync__'
   ORDER BY last_message_time DESC
   LIMIT 10;
 "
@@ -120,7 +120,7 @@ Groups are registered in `/workspace/project/data/registered_groups.json`:
 
 ```json
 {
-  "1234567890-1234567890@g.us": {
+  "-1001234567890": {
     "name": "Family Chat",
     "folder": "family-chat",
     "trigger": "@Pi",
@@ -130,7 +130,7 @@ Groups are registered in `/workspace/project/data/registered_groups.json`:
 ```
 
 Fields:
-- **Key**: The WhatsApp JID (unique identifier for the chat)
+- **Key**: The Telegram chat ID (unique identifier for the chat)
 - **name**: Display name for the group
 - **folder**: Folder name under `groups/` for this group's files and memory
 - **trigger**: The trigger word (usually same as global, but could differ)
@@ -156,7 +156,7 @@ Groups can have extra directories mounted. Add `containerConfig` to their entry:
 
 ```json
 {
-  "1234567890@g.us": {
+  "-1001234567890": {
     "name": "Dev Team",
     "folder": "dev-team",
     "trigger": "@Pi",
