@@ -37,83 +37,101 @@ If `ffmpeg` is missing:
 brew install ffmpeg
 ```
 
+**Resolve full paths** for both binaries (launchd services have minimal PATH):
+
+```bash
+PARAKEET_PATH=$(which parakeet-mlx)  # e.g. /Users/user/.local/bin/parakeet-mlx
+FFMPEG_PATH=$(which ffmpeg)          # e.g. /opt/homebrew/bin/ffmpeg
+FFMPEG_DIR=$(dirname "$FFMPEG_PATH") # e.g. /opt/homebrew/bin
+```
+
+Use these absolute paths in the code below. Do NOT rely on PATH lookup at runtime.
+
 Note: First run downloads ~200MB model to `~/.cache/huggingface/hub/`. Warn the user.
 
 ---
 
 ## Step 1: Create `src/transcription.ts`
 
+Replace `FFMPEG_PATH`, `PARAKEET_PATH`, and `FFMPEG_DIR` with the resolved values from prerequisites.
+
 ```typescript
 import { execFile } from 'child_process';
-import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
-import { downloadMediaMessage } from '@whiskeysockets/baileys';
-import type { proto, WASocket } from '@whiskeysockets/baileys';
+import { promisify } from 'util';
+
+import { downloadMediaMessage, WAMessage, proto } from '@whiskeysockets/baileys';
+
 import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
-const PARAKEET_BIN = process.env.PARAKEET_BIN || 'parakeet-mlx';
-const TRANSCRIBE_TIMEOUT_MS = 60_000;
+
+const FFMPEG_PATH = 'FFMPEG_PATH';     // e.g. '/opt/homebrew/bin/ffmpeg'
+const PARAKEET_PATH = 'PARAKEET_PATH'; // e.g. '/Users/user/.local/bin/parakeet-mlx'
+const FFMPEG_DIR = 'FFMPEG_DIR';       // e.g. '/opt/homebrew/bin'
+const TIMEOUT_MS = 60_000;
 
 export function isVoiceMessage(msg: proto.IWebMessageInfo): boolean {
   return msg.message?.audioMessage?.ptt === true;
 }
 
 export async function transcribeVoiceMessage(
-  msg: proto.IWebMessageInfo,
-  sock: WASocket,
+  msg: WAMessage,
 ): Promise<string> {
-  const tmpDir = '/tmp';
-  const id = msg.key.id || `voice_${Date.now()}`;
-  const audioPath = path.join(tmpDir, `${id}.ogg`);
-  const txtPath = path.join(tmpDir, `${id}.txt`);
+  const msgId = msg.key.id || 'unknown';
+  // Use /private/tmp (canonical path) — macOS /tmp is a symlink and tools
+  // like parakeet-mlx resolve to /private/tmp, causing path mismatches
+  const tmpDir = '/private/tmp';
+  const tmpOgg = path.join(tmpDir, `nanoclaw-voice-${msgId}.ogg`);
+  const tmpWav = path.join(tmpDir, `nanoclaw-voice-${msgId}.wav`);
+  const tmpTxt = path.join(tmpDir, `nanoclaw-voice-${msgId}.txt`);
 
   try {
-    // Download audio from WhatsApp
-    const buffer = await downloadMediaMessage(
-      msg,
-      'buffer',
-      {},
-      { logger: console as any, reuploadRequest: sock.updateMediaMessage },
-    ) as Buffer;
+    // Download audio buffer from WhatsApp
+    const buffer = await downloadMediaMessage(msg, 'buffer', {});
+    fs.writeFileSync(tmpOgg, buffer);
+    logger.info({ msgId }, 'Voice message downloaded');
 
-    if (!buffer || buffer.length === 0) {
-      throw new Error('Empty audio buffer');
-    }
+    // Convert to WAV (16kHz mono) — parakeet-mlx works best with WAV input
+    await execFileAsync(FFMPEG_PATH, [
+      '-i', tmpOgg,
+      '-ar', '16000',
+      '-ac', '1',
+      '-y', tmpWav,
+    ], { timeout: TIMEOUT_MS });
 
-    fs.writeFileSync(audioPath, buffer);
-    logger.debug({ audioPath, bytes: buffer.length }, 'Downloaded voice message');
-
-    // Run parakeet-mlx
-    await execFileAsync(PARAKEET_BIN, ['--output-format', 'txt', audioPath], {
-      timeout: TRANSCRIBE_TIMEOUT_MS,
-    });
-
-    // parakeet-mlx writes <basename>.txt next to input
-    if (!fs.existsSync(txtPath)) {
-      throw new Error(`Transcription output not found: ${txtPath}`);
-    }
-
-    const transcript = fs.readFileSync(txtPath, 'utf-8').trim();
-    if (!transcript) {
-      throw new Error('Empty transcription result');
-    }
-
-    logger.info({ id, length: transcript.length }, 'Transcribed voice message');
+    // Transcribe — must pass --output-dir (defaults to cwd, not input dir)
+    // and env PATH so parakeet-mlx can find ffmpeg (launchd has minimal PATH)
+    const env = { ...process.env, PATH: `${FFMPEG_DIR}:${process.env.PATH}` };
+    await execFileAsync(PARAKEET_PATH, [
+      '--output-format', 'txt',
+      '--output-dir', tmpDir,
+      tmpWav,
+    ], { timeout: TIMEOUT_MS, env });
+    const transcript = fs.readFileSync(tmpTxt, 'utf-8').trim();
+    logger.info({ msgId, length: transcript.length }, 'Voice message transcribed');
     return transcript;
   } finally {
-    // Cleanup temp files
-    for (const f of [audioPath, txtPath]) {
+    // Clean up temp files
+    for (const f of [tmpOgg, tmpWav, tmpTxt]) {
       try { fs.unlinkSync(f); } catch {}
     }
   }
 }
 ```
 
+### Critical implementation notes
+
+- **`/private/tmp`**: macOS `/tmp` is a symlink to `/private/tmp`. parakeet-mlx resolves paths canonically, so if you use `/tmp` for the expected output path but parakeet writes to `/private/tmp`, you get ENOENT. Always use `/private/tmp`.
+- **`--output-dir`**: parakeet-mlx defaults `--output-dir` to `.` (cwd), NOT the input file's directory. You must pass it explicitly.
+- **PATH env**: launchd services have minimal PATH. parakeet-mlx shells out to ffmpeg internally (separate from our ffmpeg conversion). Pass the ffmpeg directory in `env.PATH`.
+- **WAMessage type**: `downloadMediaMessage` expects `WAMessage`, not `proto.IWebMessageInfo`. The `messages.upsert` callback already provides `WAMessage[]`.
+- **No sock param needed**: `downloadMediaMessage(msg, 'buffer', {})` works without a context/socket argument.
+
 ## Step 2: Update `src/db.ts`
 
-In `storeMessage` (line 182), add optional `transcribedContent` parameter and prefer it over other content sources.
+In `storeMessage`, add optional `transcribedContent` parameter and prefer it over other content sources.
 
 Change signature:
 
@@ -147,7 +165,7 @@ Change content extraction to:
 import { isVoiceMessage, transcribeVoiceMessage } from './transcription.js';
 ```
 
-### 3b. Update `messages.upsert` handler (line 739)
+### 3b. Update `messages.upsert` handler
 
 Make the callback `async` and add voice handling before `storeMessage`:
 
@@ -166,17 +184,23 @@ sock.ev.on('messages.upsert', async ({ messages }) => {
     storeChatMetadata(chatJid, timestamp);
 
     if (registeredGroups[chatJid]) {
+      let transcribed: string | undefined;
       if (isVoiceMessage(msg)) {
         try {
-          const transcript = await transcribeVoiceMessage(msg, sock);
-          storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined, `[Voice: ${transcript}]`);
+          const text = await transcribeVoiceMessage(msg);
+          transcribed = `[Voice: ${text}]`;
         } catch (err) {
-          logger.error({ err }, 'Voice transcription failed');
-          storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined, '[Voice Message]');
+          logger.error({ err, msgId: msg.key.id }, 'Voice transcription failed');
+          transcribed = '[Voice Message]';
         }
-      } else {
-        storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined);
       }
+      storeMessage(
+        msg,
+        chatJid,
+        msg.key.fromMe || false,
+        msg.pushName || undefined,
+        transcribed,
+      );
     }
   }
 });
@@ -209,12 +233,13 @@ sqlite3 store/messages.db "SELECT content FROM messages WHERE content LIKE '[Voi
 
 | Problem | Fix |
 |---------|-----|
-| `parakeet-mlx: not found` | `pip3 install parakeet-mlx` or set `PARAKEET_BIN` env var to full path |
-| `ffmpeg: not found` | `brew install ffmpeg` — required by parakeet for audio conversion |
+| `parakeet-mlx: not found` | `pip3 install parakeet-mlx` or set full path in `PARAKEET_PATH` constant |
+| `ffmpeg: not found` (from parakeet) | launchd PATH issue — ensure `FFMPEG_DIR` in `env.PATH` passed to `execFileAsync` |
+| `ENOENT: .txt not found` | Two likely causes: (1) missing `--output-dir` flag, (2) `/tmp` vs `/private/tmp` mismatch |
 | Timeout (60s) | Long voice note or slow first run (model downloading). Check `~/.cache/huggingface/hub/` |
-| Empty transcription | Audio may be too short or corrupted. Check `/tmp/<id>.ogg` exists before cleanup |
+| Empty transcription | Audio may be too short or corrupted |
 | `x86_64` architecture | Not supported. Use `add-voice-transcription` skill (cloud Whisper) instead |
-| Model download fails | Check internet connection. Model downloads to `~/.cache/huggingface/hub/` on first run |
+| Model download fails | Check internet. Model downloads to `~/.cache/huggingface/hub/` on first run |
 
 ## Removal
 

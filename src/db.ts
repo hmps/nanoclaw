@@ -184,10 +184,12 @@ export function storeMessage(
   chatJid: string,
   isFromMe: boolean,
   pushName?: string,
+  transcribedContent?: string,
 ): void {
   if (!msg.key) return;
 
   const content =
+    transcribedContent ||
     msg.message?.conversation ||
     msg.message?.extendedTextMessage?.text ||
     msg.message?.imageMessage?.caption ||

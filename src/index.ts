@@ -41,6 +41,7 @@ import {
 import { startEmailLoop } from './email-channel.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { NewMessage, RegisteredGroup, Session } from './types.js';
+import { isVoiceMessage, transcribeVoiceMessage } from './transcription.js';
 import { loadJson, saveJson } from './utils.js';
 import { logger } from './logger.js';
 
@@ -745,7 +746,7 @@ async function connectWhatsApp(): Promise<void> {
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('messages.upsert', ({ messages }) => {
+  sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
       if (!msg.message) continue;
       const rawJid = msg.key.remoteJid;
@@ -753,7 +754,7 @@ async function connectWhatsApp(): Promise<void> {
 
       // Translate LID JID to phone JID if applicable
       const chatJid = translateJid(rawJid);
-      
+
       const timestamp = new Date(
         Number(msg.messageTimestamp) * 1000,
       ).toISOString();
@@ -763,11 +764,22 @@ async function connectWhatsApp(): Promise<void> {
 
       // Only store full message content for registered groups
       if (registeredGroups[chatJid]) {
+        let transcribed: string | undefined;
+        if (isVoiceMessage(msg)) {
+          try {
+            const text = await transcribeVoiceMessage(msg);
+            transcribed = `[Voice: ${text}]`;
+          } catch (err) {
+            logger.error({ err, msgId: msg.key.id }, 'Voice transcription failed');
+            transcribed = '[Voice Message]';
+          }
+        }
         storeMessage(
           msg,
           chatJid,
           msg.key.fromMe || false,
           msg.pushName || undefined,
+          transcribed,
         );
       }
     }
