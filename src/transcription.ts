@@ -3,8 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 
-import { downloadMediaMessage, WAMessage, proto } from '@whiskeysockets/baileys';
-
 import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -13,14 +11,10 @@ const FFMPEG_PATH = '/opt/homebrew/bin/ffmpeg';
 const PARAKEET_PATH = '/Users/hmps/.local/bin/parakeet-mlx';
 const TIMEOUT_MS = 60_000;
 
-export function isVoiceMessage(msg: proto.IWebMessageInfo): boolean {
-  return msg.message?.audioMessage?.ptt === true;
-}
-
 export async function transcribeVoiceMessage(
-  msg: WAMessage,
+  buffer: Buffer,
+  msgId: string,
 ): Promise<string> {
-  const msgId = msg.key.id || 'unknown';
   // Use /private/tmp (canonical path) instead of /tmp symlink for consistency with parakeet output
   const tmpDir = '/private/tmp';
   const tmpOgg = path.join(tmpDir, `nanoclaw-voice-${msgId}.ogg`);
@@ -28,8 +22,6 @@ export async function transcribeVoiceMessage(
   const tmpTxt = path.join(tmpDir, `nanoclaw-voice-${msgId}.txt`);
 
   try {
-    // Download audio buffer from WhatsApp
-    const buffer = await downloadMediaMessage(msg, 'buffer', {});
     fs.writeFileSync(tmpOgg, buffer);
     logger.info({ msgId }, 'Voice message downloaded');
 
