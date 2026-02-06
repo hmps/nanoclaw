@@ -61,7 +61,7 @@ export const TELEGRAM_BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME || '';
 
 Delete `import { proto } from '@whiskeysockets/baileys';` (line 5).
 
-Replace `storeMessage` (lines 182-213) with:
+Replace `storeMessage` (lines 182-213) with flat args — caller handles content extraction and timestamp conversion:
 
 ```typescript
 export function storeMessage(
@@ -70,17 +70,20 @@ export function storeMessage(
   text: string,
   sender: string,
   senderName: string,
-  timestamp: number,
+  timestamp: string,
   isFromMe: boolean,
 ): void {
-  const ts = new Date(timestamp * 1000).toISOString();
   db.prepare(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(messageId, chatId, sender, senderName, text, ts, isFromMe ? 1 : 0);
+  ).run(messageId, chatId, sender, senderName, text, timestamp, isFromMe ? 1 : 0);
 }
 ```
 
-Signature changed: `(msg: proto.IWebMessageInfo, chatJid, isFromMe, pushName?)` → `(chatId, messageId, text, sender, senderName, timestamp, isFromMe)`. Update call sites.
+Signature changed: `(msg: proto.IWebMessageInfo, chatJid, isFromMe, pushName?)` → `(chatId, messageId, text, sender, senderName, timestamp, isFromMe)`. Caller passes ISO string timestamp. Update call sites.
+
+### A5b. `src/transcription.ts` — Update if exists
+
+If `src/transcription.ts` exists (from the local transcription skill), it has baileys imports that need updating. See the `add-local-transcription` skill for Telegram-specific instructions.
 
 ### A6. `src/index.ts` — Full rewrite of WhatsApp code
 
@@ -181,20 +184,23 @@ async function connectTelegram(): Promise<void> {
 
   bot = new Bot(TELEGRAM_BOT_TOKEN);
 
-  bot.on('message', (ctx) => {
+  bot.on('message', async (ctx) => {
     const msg = ctx.message;
     const chatId = String(msg.chat.id);
-    const text = msg.text || msg.caption || '';
-    if (!text) return;
-
     const timestamp = new Date(msg.date * 1000).toISOString();
-    const sender = String(msg.from?.id || '');
-    const senderName = msg.from?.first_name || sender;
     const messageId = String(msg.message_id);
+    const sender = msg.from ? String(msg.from.id) : chatId;
+    const senderName = msg.from
+      ? (msg.from.first_name + (msg.from.last_name ? ` ${msg.from.last_name}` : ''))
+      : 'Unknown';
 
-    storeChatMetadata(chatId, timestamp);
+    // Extract chat name for group discovery
+    const chatName = 'title' in msg.chat ? msg.chat.title : undefined;
+    storeChatMetadata(chatId, timestamp, chatName);
+
     if (registeredGroups[chatId]) {
-      storeMessage(chatId, messageId, text, sender, senderName, msg.date, false);
+      const text = msg.text || msg.caption || '';
+      storeMessage(chatId, messageId, text, sender, senderName, timestamp, false);
     }
   });
 
@@ -205,7 +211,16 @@ async function connectTelegram(): Promise<void> {
       startSchedulerLoop({ sendMessage, registeredGroups: () => registeredGroups, getSessions: () => sessions });
       startIpcWatcher();
       startMessageLoop();
-      startEmailLoop({ getSessions: () => sessions, saveSessions: (s) => { sessions = s; saveState(); } });
+      startEmailLoop({
+        getSessions: () => sessions,
+        saveSessions: (s) => { sessions = s; saveState(); },
+        getMainChatJid: () => {
+          const mainEntry = Object.entries(registeredGroups).find(
+            ([_, group]) => group.folder === MAIN_GROUP_FOLDER
+          );
+          return mainEntry ? mainEntry[0] : null;
+        },
+      });
     },
   });
 }
@@ -228,10 +243,25 @@ Replace `"auth": "tsx src/whatsapp-auth.ts"` with:
 
 ### A9. `container/agent-runner/src/ipc-mcp.ts` — Channel-agnostic
 
-Update `register_group` tool (line 281):
-- Description: "Register a new WhatsApp group" → "Register a new chat"
+Update tool descriptions:
+- `send_message`: "Send a message to the current WhatsApp group" → "Send a message to the current chat"
+- `register_group`: "Register a new WhatsApp group" → "Register a new chat"
 - "available_groups.json to find the JID" → "available_groups.json to find the chat ID"
 - jid describe: `'The WhatsApp JID (e.g., "120363336345536173@g.us")'` → `'The chat ID (e.g., "-1001234567890" for groups)'`
+
+### A9b. `bin/start.sh` — launchd wrapper for `.env` loading
+
+The host process needs `TELEGRAM_BOT_TOKEN` from env. Instead of hardcoding it in the plist, create a wrapper that sources `.env`:
+
+```bash
+#!/bin/bash
+set -a
+source "$(dirname "$0")/../.env"
+set +a
+exec /path/to/node "$(dirname "$0")/../dist/index.js"
+```
+
+Update plist `ProgramArguments` to use `/bin/bash bin/start.sh` instead of invoking node directly. Remove any hardcoded env vars from the plist (like `ASSISTANT_NAME`) — they now come from `.env`.
 
 ### A10. Documentation updates
 
@@ -422,9 +452,11 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 |------|--------|----------|
 | `src/config.ts` | Add TG config | Same |
 | `src/db.ts` | Replace `storeMessage` | Add `storeTelegramMessage` |
+| `src/transcription.ts` | Remove baileys dep, new signature | — |
 | `src/types.ts` | — | Add `channel` field |
 | `src/index.ts` | Replace WA → TG | Add parallel TG |
 | `src/whatsapp-auth.ts` | Delete | — |
+| `bin/start.sh` | Create (launchd wrapper) | — |
 | `package.json` | Swap deps | Add grammy |
 | `container/agent-runner/src/ipc-mcp.ts` | Channel-agnostic | Same |
 | `groups/main/CLAUDE.md` | Update refs | — |

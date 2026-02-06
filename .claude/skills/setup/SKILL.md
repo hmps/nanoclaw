@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate WhatsApp, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
+description: Run initial NanoClaw setup. Use when user wants to install dependencies, configure Telegram bot, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
 ---
 
 # NanoClaw Setup
@@ -137,25 +137,33 @@ else
 fi
 ```
 
-## 5. WhatsApp Authentication
+## 5. Telegram Bot Token
 
 **USER ACTION REQUIRED**
 
-Run the authentication script:
+Ask the user:
+> Do you already have a Telegram bot token, or do you need to create one?
 
-```bash
-npm run auth
-```
+### If they need to create one:
 
 Tell the user:
-> A QR code will appear. On your phone:
-> 1. Open WhatsApp
-> 2. Tap **Settings → Linked Devices → Link a Device**
-> 3. Scan the QR code
+> 1. Open Telegram and message **@BotFather**
+> 2. Send `/newbot` and follow the prompts
+> 3. Copy the bot token and paste it here
 
-Wait for the script to output "Successfully authenticated" then continue.
+### Once they have the token:
 
-If it says "Already authenticated", skip to the next step.
+Verify it works:
+
+```bash
+curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe" | python3 -m json.tool
+```
+
+If valid, add to `.env`:
+```bash
+grep -q TELEGRAM_BOT_TOKEN .env || echo "TELEGRAM_BOT_TOKEN=<token>" >> .env
+grep -q TELEGRAM_BOT_USERNAME .env || echo "TELEGRAM_BOT_USERNAME=@<bot_username>" >> .env
+```
 
 ## 6. Configure Assistant Name
 
@@ -185,13 +193,13 @@ Before registering your main channel, you need to understand an important securi
 > - Can write to global memory that all groups can read
 > - Has read-write access to the entire NanoClaw project
 >
-> **Recommendation:** Use your personal "Message Yourself" chat or a solo WhatsApp group as your main channel. This ensures only you have admin control.
+> **Recommendation:** Use a private chat with the bot or a solo Telegram group as your main channel. This ensures only you have admin control.
 >
 > **Question:** Which setup will you use for your main channel?
 >
 > Options:
-> 1. Personal chat (Message Yourself) - Recommended
-> 2. Solo WhatsApp group (just me)
+> 1. Private chat with the bot - Recommended
+> 2. Solo Telegram group (just me)
 > 3. Group with other people (I understand the security implications)
 
 If they choose option 3, ask a follow-up:
@@ -205,18 +213,20 @@ If they choose option 3, ask a follow-up:
 >
 > Options:
 > 1. Yes, I understand and want to proceed
-> 2. No, let me use a personal chat or solo group instead
+> 2. No, let me use a private chat or solo group instead
 
 ## 8. Register Main Channel
 
 Ask the user:
-> Do you want to use your **personal chat** (message yourself) or a **WhatsApp group** as your main control channel?
+> Do you want to use a **private chat with the bot** or a **Telegram group** as your main control channel?
 
-For personal chat:
-> Send any message to yourself in WhatsApp (the "Message Yourself" chat). Tell me when done.
+For private chat:
+> Send any message to the bot in Telegram. Tell me when done.
 
 For group:
-> Send any message in the WhatsApp group you want to use as your main channel. Tell me when done.
+> 1. Create a Telegram group (or use an existing one)
+> 2. Add the bot to the group
+> 3. Send any message in the group. Tell me when done.
 
 After user confirms, start the app briefly to capture the message:
 
@@ -224,20 +234,16 @@ After user confirms, start the app briefly to capture the message:
 timeout 10 npm run dev || true
 ```
 
-Then find the JID from the database:
+Then find the chat ID from the database:
 
 ```bash
-# For personal chat (ends with @s.whatsapp.net)
-sqlite3 store/messages.db "SELECT DISTINCT chat_jid FROM messages WHERE chat_jid LIKE '%@s.whatsapp.net' ORDER BY timestamp DESC LIMIT 5"
-
-# For group (ends with @g.us)
-sqlite3 store/messages.db "SELECT DISTINCT chat_jid FROM messages WHERE chat_jid LIKE '%@g.us' ORDER BY timestamp DESC LIMIT 5"
+sqlite3 store/messages.db "SELECT DISTINCT chat_jid FROM messages ORDER BY timestamp DESC LIMIT 5"
 ```
 
-Create/update `data/registered_groups.json` using the JID from above and the assistant name from step 5:
+Create/update `data/registered_groups.json` using the chat ID from above and the assistant name from step 5:
 ```json
 {
-  "JID_HERE": {
+  "CHAT_ID_HERE": {
     "name": "main",
     "folder": "main",
     "trigger": "@ASSISTANT_NAME",
@@ -445,9 +451,9 @@ The user should receive a response in WhatsApp.
 - Check that the chat JID is in `data/registered_groups.json`
 - Check `logs/nanoclaw.log` for errors
 
-**WhatsApp disconnected**:
-- The service will show a macOS notification
-- Run `npm run auth` to re-authenticate
+**Telegram bot not responding**:
+- Check that `TELEGRAM_BOT_TOKEN` is set correctly in `.env`
+- Verify with: `curl -s "https://api.telegram.org/bot<TOKEN>/getMe"`
 - Restart the service: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
 
 **Unload service**:
