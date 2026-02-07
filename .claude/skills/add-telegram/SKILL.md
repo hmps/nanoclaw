@@ -301,6 +301,29 @@ exec /path/to/node "$(dirname "$0")/../dist/index.js"
 
 Update plist `ProgramArguments` to use `/bin/bash bin/start.sh` instead of invoking node directly. Remove any hardcoded env vars from the plist (like `ASSISTANT_NAME`) — they now come from `.env`.
 
+### A9c. Preserve `containerConfig` from old entry
+
+Before overwriting `registered_groups.json` with the new Telegram chat ID, check the old file for `containerConfig` (especially `additionalMounts`). If present, copy it to the new entry.
+
+Also check `~/.config/nanoclaw/mount-allowlist.json` — if it has `allowedRoots`, ask the user:
+
+> Your mount allowlist has these directories configured:
+> - `~/dev` (read-write)
+> - `~/ai-workspaces` (read-write)
+>
+> Do you want the Telegram bot to have access to these same directories?
+
+If yes, add them as `containerConfig.additionalMounts` in the new entry:
+
+```json
+"containerConfig": {
+  "additionalMounts": [
+    { "hostPath": "~/dev", "containerPath": "dev", "readonly": false },
+    { "hostPath": "~/ai-workspaces", "containerPath": "ai-workspaces", "readonly": false }
+  ]
+}
+```
+
 ### A10. Image support & `.gitignore`
 
 Photos are saved to `groups/{folder}/images/` and referenced as `[Image: /workspace/group/images/{id}.jpg]` in messages. The agent uses its `Read` tool (multimodal) to view them. Add to `.gitignore`:
@@ -439,7 +462,9 @@ async function sendMessage(jid: string, text: string): Promise<void> {
 
 ### B8. `data/registered_groups.json`
 
-Add Telegram entries with `"channel": "telegram"`. Existing WhatsApp entries default to `'whatsapp'` when `channel` is absent:
+Add Telegram entries with `"channel": "telegram"`. Existing WhatsApp entries default to `'whatsapp'` when `channel` is absent.
+
+**Important:** If existing entries have `containerConfig` (especially `additionalMounts`), preserve it when creating new Telegram entries for the same group. Also check `~/.config/nanoclaw/mount-allowlist.json` for configured directories and ask the user if new Telegram groups should have access.
 
 ```json
 {
